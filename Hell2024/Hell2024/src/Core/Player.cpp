@@ -7,6 +7,7 @@
 #include "../Util.hpp"
 #include "AnimatedGameObject.h"
 #include "Config.hpp"
+#include "../EngineState.hpp"
 
 int Player::GetCurrentWeaponClipAmmo() {
 	if (_currentWeaponIndex == Weapon::GLOCK) {
@@ -35,8 +36,6 @@ Player::Player(glm::vec3 position, glm::vec3 rotation) {
 
 	Respawn(position, rotation);
 
-	_weaponInventory.resize(Weapon::WEAPON_COUNT);
-
 	_characterModel.SetSkinnedModel("UniSexGuy2");
 	_characterModel.SetMeshMaterial("CC_Base_Body", "UniSexGuyBody");
 	_characterModel.SetMeshMaterial("CC_Base_Eye", "UniSexGuyBody");
@@ -48,11 +47,6 @@ Player::Player(glm::vec3 position, glm::vec3 rotation) {
 
 	_shadowMap.Init();
 	
-	_weaponInventory[Weapon::KNIFE] = true;
-	_weaponInventory[Weapon::GLOCK] = true;
-	_weaponInventory[Weapon::SHOTGUN] = false;
-	_weaponInventory[Weapon::AKS74U] = false;
-	_weaponInventory[Weapon::MP7] = false;
 
 
 	CreateCharacterController(_position);
@@ -117,12 +111,18 @@ void Player::PickUpAKS74U() {
 }
 
 void Player::PickUpAKS74UAmmo() {
-	ShowPickUpText("PICKED UP AKS74U AMMO");
+	ShowPickUpText("PICKED UP SOME AMMO");
 	Audio::PlayAudio("ItemPickUp.wav", 1.0f);
 	_inventory.aks74uAmmo.total += AKS74U_MAG_SIZE * 3;
 }
 
 void Player::Update(float deltaTime) {
+
+
+	if (Input::KeyDown(HELL_KEY_U)) {
+		DropAKS7UMag();
+	}
+	
 			
 	if (_pickUpTextTimer > 0) {
 		_pickUpTextTimer -= deltaTime;
@@ -137,12 +137,14 @@ void Player::Update(float deltaTime) {
 	_muzzleFlashCounter = std::max(_muzzleFlashCounter, 0.0f);
 
 	// Mouselook
-	if (!_ignoreControl && GL::WindowHasFocus()) {
-		float mouseSensitivity = 0.002f;
-		_rotation.x += -Input::GetMouseOffsetY() * mouseSensitivity;
-		_rotation.y += -Input::GetMouseOffsetX() * mouseSensitivity;
-		_rotation.x = std::min(_rotation.x, 1.5f);
-		_rotation.x = std::max(_rotation.x, -1.5f);
+	if (EngineState::GetEngineMode() == GAME) {
+		if (!_ignoreControl && GL::WindowHasFocus()) {
+			float mouseSensitivity = 0.002f;
+			_rotation.x += -Input::GetMouseOffsetY() * mouseSensitivity;
+			_rotation.y += -Input::GetMouseOffsetX() * mouseSensitivity;
+			_rotation.x = std::min(_rotation.x, 1.5f);
+			_rotation.x = std::max(_rotation.x, -1.5f);
+		}
 	}
 
 	float amt = 0.02f;
@@ -210,28 +212,31 @@ void Player::Update(float deltaTime) {
 			_isMoving = true;
 		}
 	}
+	float fixedDeltaTime = (1.0f / 60.0f);
 
-	// Adjust displacement for deltatime and movement speed
+	// Normalize displacement vector and include player speed
 	float len = length(displacement);
 	if (len != 0.0) {
 		float speed = crouching ? _crouchingSpeed : _walkingSpeed;
-		displacement = (displacement / len) * speed* deltaTime;
+		displacement = (displacement / len) * speed * deltaTime;
 	}
 
 	// Jump
 	if (Input::KeyPressed(HELL_KEY_SPACE) && !_ignoreControl && _isGrounded) {
-		_yVelocity = 6.5f * deltaTime;
+		_yVelocity = 4.75f; // magic value for jump strength
 		_isGrounded = false;
 	}
 
 	// Gravity		
 	if (_isGrounded) {
-		_yVelocity = -0.01f; // can't be 0, or the _isGrounded check next frame will fail
+		_yVelocity = -0.1f; // can't be 0, or the _isGrounded check next frame will fail
 	}
 	else {
-		_yVelocity -= 0.50f * deltaTime;
+		float gravity = 15.75f; // 9.8 feels like the moon
+		_yVelocity -= gravity * deltaTime;
 	}
-		
+	float yDisplacement = _yVelocity * deltaTime;
+
 	// Move PhysX character controller
 	PxFilterData filterData;
 	filterData.word0 = 0;
@@ -239,7 +244,7 @@ void Player::Update(float deltaTime) {
 	PxControllerFilters data;
 	data.mFilterData = &filterData;
 	PxF32 minDist = 0.001f;
-	_characterController->move(PxVec3(displacement.x, _yVelocity , displacement.z), minDist, deltaTime, data);
+	_characterController->move(PxVec3(displacement.x, yDisplacement, displacement.z), minDist, fixedDeltaTime, data);
 	_position = Util::PxVec3toGlmVec3(_characterController->getFootPosition());
 	
 	// Footstep audio
@@ -264,6 +269,9 @@ void Player::Update(float deltaTime) {
 	}
 	// Next weapon
 	if (!_ignoreControl && Input::KeyPressed(HELL_KEY_Q)) {
+
+
+		_needsToDropAKMag = false;
 
 		Audio::PlayAudio("Glock_Equip.wav", 0.5f);
 		_needsAmmoReloaded = false;
@@ -445,13 +453,16 @@ void Player::Interact() {
 
 void Player::Respawn(glm::vec3 position, glm::vec3 rotation) {
 
-	if (_weaponInventory.size()) {
-		_weaponInventory[Weapon::KNIFE] = true;
-		_weaponInventory[Weapon::GLOCK] = true;
-		_weaponInventory[Weapon::SHOTGUN] = false;
-		_weaponInventory[Weapon::AKS74U] = false;
-		_weaponInventory[Weapon::MP7] = false;
+	if (_weaponInventory.empty()) {
+		_weaponInventory.resize(Weapon::WEAPON_COUNT);
 	}
+
+	// Loadout on spawn
+	_weaponInventory[Weapon::KNIFE] = true;
+	_weaponInventory[Weapon::GLOCK] = true;
+	_weaponInventory[Weapon::SHOTGUN] = false;
+	_weaponInventory[Weapon::AKS74U] = false;
+	_weaponInventory[Weapon::MP7] = false;
 
 	SetWeapon(Weapon::GLOCK);
 	_weaponAction = SPAWNING;
@@ -713,6 +724,12 @@ void Player::UpdateFirstPersonWeaponLogicAndAnimations(float deltaTime) {
 
 	if (_currentWeaponIndex == Weapon::AKS74U) {
 
+		// Drop the mag
+		if (_needsToDropAKMag && _weaponAction == RELOAD_FROM_EMPTY && _firstPersonWeapon.AnimationIsPastPercentage(28.125f)) {
+			_needsToDropAKMag = false;
+			DropAKS7UMag();
+		}
+
 		// Give reload ammo
 		if (_weaponAction == RELOAD || _weaponAction == RELOAD_FROM_EMPTY) {
 			if (_needsAmmoReloaded && _firstPersonWeapon.AnimationIsPastPercentage(38.0f)) {
@@ -744,6 +761,7 @@ void Player::UpdateFirstPersonWeaponLogicAndAnimations(float deltaTime) {
 				_firstPersonWeapon.PlayAnimation("AKS74U_ReloadEmpty", 1.0f);
 				Audio::PlayAudio("AK47_ReloadEmpty.wav", 1.0f);
 				_weaponAction = RELOAD_FROM_EMPTY;
+				_needsToDropAKMag = true;
 			}
 			else {
 				_firstPersonWeapon.PlayAnimation("AKS74U_Reload", 1.0f);
@@ -954,6 +972,49 @@ void Player::SpawnBullet(float variance) {
 	}
 }
 
+/*
+void Player::CastMouseRay() {
+
+	Bullet bullet;
+	bullet.spawnPosition = GetViewPos();
+
+	bullet.direction = GameState::_mouseRay;// (glm::normalize(GetCameraForward()))* glm::vec3(-1);
+	Scene::_bullets.push_back(bullet);
+
+	Audio::PlayAudio("Glock_Fire1.wav", 1.0f);
+}*/
+
+
+void Player::DropAKS7UMag() {
+
+	PhysicsFilterData magFilterData;
+	magFilterData.raycastGroup = RAYCAST_DISABLED;
+	magFilterData.collisionGroup = CollisionGroup::GENERIC_BOUNCEABLE;
+	magFilterData.collidesWith = CollisionGroup(ENVIROMENT_OBSTACLE | GENERIC_BOUNCEABLE);
+	float magDensity = 750.0f;
+
+	GameObject& mag = Scene::_gameObjects.emplace_back();
+	mag.SetPosition(GetViewPos() + glm::vec3(0, -0.2f, 0));
+	mag.SetRotationX(-1.7f);
+	mag.SetRotationY(0.0f);
+	mag.SetRotationZ(-1.6f);
+	mag.SetModel("AKS74UMag");
+	mag.SetName("AKS74UMag");
+	mag.SetMeshMaterial("AKS74U_3");
+	mag.CreateRigidBody(mag.GetGameWorldMatrix(), false);
+	mag.SetRaycastShapeFromModel(AssetManager::GetModel("AKS74UMag"));
+	mag.AddCollisionShapeFromConvexMesh(&AssetManager::GetModel("AKS74UMag_ConvexMesh")->_meshes[0], magFilterData);
+	mag.SetModelMatrixMode(ModelMatrixMode::PHYSX_TRANSFORM);
+	mag.UpdateRigidBodyMassAndInertia(magDensity);
+	mag.CreateEditorPhysicsObject();
+
+	for (auto& gameObject : Scene::_gameObjects) {
+		gameObject.CreateEditorPhysicsObject();
+	}
+
+	std::cout << "dropped ak mag\n";
+
+}
 
 float Player::GetMuzzleFlashTime() {
 	return _muzzleFlashTimer;

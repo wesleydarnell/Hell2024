@@ -4,7 +4,9 @@
 #include "Input.h"
 #include "Scene.h"
 #include "Config.hpp"
-#include "Editor.h"
+#include "Floorplan.h"
+#include "../Renderer/Renderer.h"
+#include "../EngineState.hpp"
 #include <format>
 
 #define AUDIO_SELECT "SELECT.wav"
@@ -21,9 +23,11 @@ namespace DebugMenu {
 
 	MenuItem _windowMenu;
 	MenuItem _gameObjectsMenu;
+	MenuItem _lightsMenu;
 
 	int _selectedWindowIndex = -1;
 	int _selectedGameObjectIndex = -1;
+	int _selectedLightIndex = -1;
 
 }
 
@@ -49,8 +53,8 @@ void DebugMenu::Init() {
 		auto& addObject = scene.AddItem("Add object",MenuItemFlag::UNDEFINED, nullptr); {
 			addObject.AddItem("Game Object",MenuItemFlag::UNDEFINED, nullptr);
 			addObject.AddItem("Door",MenuItemFlag::UNDEFINED, nullptr);
-			addObject.AddItem("Window",MenuItemFlag::ADD_WINDOW, nullptr);
-			addObject.AddItem("Light",MenuItemFlag::UNDEFINED, nullptr);
+			addObject.AddItem("Window", MenuItemFlag::ADD_WINDOW, nullptr);
+			addObject.AddItem("Light", MenuItemFlag::ADD_LIGHT, nullptr);
 		}
 		// Edit objects
 		auto& editObjects = scene.AddItem("Edit objects",MenuItemFlag::UNDEFINED, nullptr); {
@@ -74,7 +78,9 @@ void DebugMenu::Init() {
 			}
 
 			auto& editLights = editObjects.AddItem("Lights", MenuItemFlag::UNDEFINED, nullptr); {
-
+				for (int i = 0; i < Scene::_lights.size(); i++) {
+					editLights.AddItem("Light " + std::to_string(i), MenuItemFlag::EDIT_LIGHT, nullptr);
+				}
 			}
 
 		}
@@ -86,7 +92,10 @@ void DebugMenu::Init() {
 	
 	}
 	// Editor
-	auto& editor = _menu.AddItem("Floor Plan", MenuItemFlag::OPEN_FLOOR_PLAN, nullptr);
+	_menu.AddItem("", MenuItemFlag::UNDEFINED, nullptr);
+	auto& gameMode = _menu.AddItem("Game Mode", MenuItemFlag::OPEN_GAME_MODE, nullptr);
+	auto& editor = _menu.AddItem("Editor Mode", MenuItemFlag::OPEN_EDITOR_MODE, nullptr);
+	auto& floorplan = _menu.AddItem("Floor Plan", MenuItemFlag::OPEN_FLOOR_PLAN, nullptr);
 
 	_menu.AddItem("", MenuItemFlag::UNDEFINED, nullptr);
 	_menu.AddItem("Revert to map file", MenuItemFlag::LOAD_MAP, nullptr);
@@ -102,6 +111,7 @@ void DebugMenu::Init() {
 	_parentMenuItem = nullptr;
 	_selectedWindowIndex = -1;
 	_selectedGameObjectIndex = -1;
+	_selectedLightIndex = -1;
 }
 
 void DebugMenu::UpdateWindowMenuPointers() {
@@ -126,6 +136,19 @@ void DebugMenu::UpdateGameObjectMenuPointers() {
 	_gameObjectsMenu.AddItem("Remove", MenuItemFlag::REMOVE_GAME_OBJECT, nullptr);
 }
 
+void DebugMenu::UpdateLightObjectMenuPointers() {
+	_lightsMenu.subMenu.clear();
+	_lightsMenu.AddItem("X Position", MenuItemFlag::FLOAT, &Scene::_lights[_selectedLightIndex].position.x);
+	_lightsMenu.AddItem("Y Position", MenuItemFlag::FLOAT, &Scene::_lights[_selectedLightIndex].position.y);
+	_lightsMenu.AddItem("Z Position", MenuItemFlag::FLOAT, &Scene::_lights[_selectedLightIndex].position.z);
+	_lightsMenu.AddItem("", MenuItemFlag::UNDEFINED, nullptr);
+	_lightsMenu.AddItem("Strength", MenuItemFlag::FLOAT, &Scene::_lights[_selectedLightIndex].strength);
+	_lightsMenu.AddItem("Radius", MenuItemFlag::FLOAT, &Scene::_lights[_selectedLightIndex].radius);
+	/*
+	Doesn't display the right light index after removing
+	_lightsMenu.AddItem("Remove", MenuItemFlag::REMOVE_LIGHT, nullptr);
+	*/
+}
 
 void DebugMenu::Update() {
 
@@ -135,6 +158,10 @@ void DebugMenu::Update() {
 	if (_selectedGameObjectIndex != -1) {
 		UpdateGameObjectMenuPointers();
 	}
+	if (_selectedLightIndex != -1) {
+		UpdateLightObjectMenuPointers();
+	}
+
 
 	if (!IsOpen()) {
 		return;
@@ -178,7 +205,20 @@ void DebugMenu::PressedEnter() {
 	// Open floor plan editor
 	else if (flag == MenuItemFlag::OPEN_FLOOR_PLAN) {
 		_isOpen = false;
-		Editor::ForcedOpen();
+		EngineState::_engineMode = FLOORPLAN;
+		Audio::PlayAudio(AUDIO_SELECT, 1.00f);
+	}
+	// Open game mode
+	else if (flag == MenuItemFlag::OPEN_GAME_MODE) {
+		_isOpen = false;
+		EngineState::_engineMode = EngineMode::GAME;
+		Audio::PlayAudio(AUDIO_SELECT, 1.00f);
+	}
+	// Open editor mode
+	else if (flag == MenuItemFlag::OPEN_EDITOR_MODE) {
+		_isOpen = false;
+		EngineState::_engineMode = EngineMode::EDITOR;
+		EngineState::_viewportMode == FULLSCREEN;
 		Audio::PlayAudio(AUDIO_SELECT, 1.00f);
 	}
 	// Load map
@@ -243,6 +283,26 @@ void DebugMenu::PressedEnter() {
 		Scene::RecreateDataStructures();
 		*/
 	}
+	else if (flag == MenuItemFlag::ADD_LIGHT) {
+		std::cout << "you need to write this code mate\n";
+	}
+	else if (flag == MenuItemFlag::EDIT_LIGHT) {
+		std::cout << "Selected EDIT_LIGHT and _selectetionIndex was " << _selectionIndex << "\n";
+		_parentMenuItem = _currentMenuItem;
+		_currentMenuItem = &_lightsMenu;
+		_selectedLightIndex = _selectionIndex;
+		_lightsMenu.name = "LIGHT " + std::to_string(_selectedLightIndex);
+		_selectionIndex = 0;
+		Audio::PlayAudio(AUDIO_SELECT, 1.0f);
+	}
+
+	else if (flag == MenuItemFlag::REMOVE_LIGHT) {
+		/*
+		Light& light = Scene::_lights[_selectedLightIndex];
+		Scene::_lights.erase(Scene::_lights.begin() + _selectedLightIndex);
+		Scene::UnloadLightSetup(_selectedLightIndex);
+		*/
+	}
 
 }
 
@@ -299,8 +359,15 @@ void DebugMenu::IncreaseValue() {
 		if (flag == MenuItemFlag::FLOAT) {
 			*(float*)ptr += 0.1f;
 		}
+		Scene::RecreateDataStructures();
 	}
-
+	if (_currentMenuItem == &_lightsMenu) {
+		Light& light = Scene::_lights[_selectedLightIndex];
+		if (flag == MenuItemFlag::FLOAT) {
+			*(float*)ptr += 0.1f;
+		}
+		Scene::RecreateDataStructures();
+	}
 }
 
 void DebugMenu::DecreaseValue() {
@@ -317,12 +384,19 @@ void DebugMenu::DecreaseValue() {
 		Scene::RecreateDataStructures();
 	}
 
-
 	if (_currentMenuItem == &_gameObjectsMenu) {
 		GameObject& gameObject = Scene::_gameObjects[_selectedGameObjectIndex];
 		if (flag == MenuItemFlag::FLOAT) {
 			*(float*)ptr -= 0.1f;
 		}
+		Scene::RecreateDataStructures();
+	}	
+	if (_currentMenuItem == &_lightsMenu) {
+		Light& light = Scene::_lights[_selectedLightIndex];
+		if (flag == MenuItemFlag::FLOAT) {
+			*(float*)ptr -= 0.1f;
+		}
+		Scene::RecreateDataStructures();
 	}
 }
 
@@ -397,8 +471,8 @@ const std::string DebugMenu::GetTextRight() {
 		std::string rightBracket = "  ";
 
 		if (_selectionIndex == i) {
-			leftBracket = "[g]< ";
-			rightBracket = " >[w]";
+			leftBracket = "< ";
+			rightBracket = " >";
 		}
 
 

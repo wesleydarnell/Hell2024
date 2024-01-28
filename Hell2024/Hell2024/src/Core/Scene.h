@@ -158,8 +158,6 @@ struct PickUp {
 
 namespace Scene {
 
-    // Perhaps this isn't the best place to store this?
-    inline int _playerCount = 2;
     inline PxTriangleMesh* _sceneTriangleMesh = NULL;
     inline PxRigidStatic* _sceneRigidDynamic = NULL;
     inline PxShape* _sceneShape = NULL;
@@ -189,6 +187,7 @@ namespace Scene {
    // void NewScene();
     void CleanUp();
     void Update(float deltaTime);
+    void Update3DEditorScene();
     void LoadLightSetup(int index);
     GameObject* GetGameObjectByName(std::string);
     AnimatedGameObject* GetAnimatedGameObjectByName(std::string);

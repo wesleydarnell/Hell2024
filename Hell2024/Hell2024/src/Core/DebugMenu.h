@@ -17,8 +17,13 @@ namespace DebugMenu {
 
 		// Actions
 		OPEN_FLOOR_PLAN,
-		ADD_WINDOW, 
+		OPEN_EDITOR_MODE,
+		OPEN_GAME_MODE,
+		ADD_WINDOW,
 		EDIT_WINDOW,
+		ADD_LIGHT,
+		EDIT_LIGHT,
+		REMOVE_LIGHT,
 		REMOVE_WINDOW,
 		EDIT_GAME_OBJECT,
 		REMOVE_GAME_OBJECT,
@@ -63,6 +68,7 @@ namespace DebugMenu {
 	const bool SubMenuHasValues();
 
 	void UpdateWindowMenuPointers();
-	void UpdateGameObjectMenuPointers();
+	void UpdateGameObjectMenuPointers(); 
+	void UpdateLightObjectMenuPointers();
 };
 

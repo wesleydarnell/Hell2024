@@ -1,4 +1,5 @@
 #include "Engine.h"
+#include "EngineState.hpp"
 #include "Util.hpp"
 #include "Renderer/Renderer.h"
 #include "Core/GL.h"
@@ -6,26 +7,17 @@
 #include "Core/Input.h"
 #include "Core/AssetManager.h"
 #include "Core/Audio.hpp"
-#include "Core/Editor.h"
+#include "Core/Floorplan.h"
 #include "Core/TextBlitter.h"
 #include "Core/Scene.h"
 #include "Core/Physics.h"
 #include "Core/DebugMenu.h"
 
-// Profiling stuff
-//#define TracyGpuCollect
-//#include "tracy/Tracy.hpp"
-//#include "tracy/TracyOpenGL.hpp"
-
-enum class EngineMode { Game, Editor } _engineMode;
-int _currentPlayer = 0;
-
-void ToggleEditor();
 void ToggleFullscreen();
-void NextPlayer();
-void NextViewportMode();
 
 void Engine::Run() {
+
+	std::cout << "We are all alone on life's journey, held captive by the limitations of human consciousness.\n";
 
 	GL::Init(1920 * 1.5f, 1080 * 1.5f);
 
@@ -43,7 +35,7 @@ void Engine::Run() {
     while (GL::WindowIsOpen()) {
 
 		if (Input::KeyPressed(GLFW_KEY_F)) {
-			ToggleFullscreen();
+            ToggleFullscreen();
 		}
 		if (Input::KeyPressed(GLFW_KEY_ESCAPE)) {
 			return;
@@ -53,11 +45,10 @@ void Engine::Run() {
         Renderer::RenderLoadingFrame();
         GL::SwapBuffersPollEvents();
 
-        //std::cout << AssetManager::numFilesToLoad << " " << AssetManager::_loadLog.size() << "\n";
-
-		if (AssetManager::_loadLog.size() == 200) { // remember the first 2 lines of _loadLog are that welcome msg, and not actual files
-			break;
-		}
+        // Final asset has been loaded
+		if (AssetManager::_loadLog.size() == AssetManager::numFilesToLoad) {
+            break;
+        }
     }
 
     //////////////////////////////////
@@ -68,7 +59,9 @@ void Engine::Run() {
     while (GL::WindowIsOpen()) {
 
 		if (Input::KeyPressed(GLFW_KEY_F)) {
-			ToggleFullscreen();
+			GL::ToggleFullscreen();
+			Renderer::RecreateFrameBuffers(EngineState::GetCurrentPlayer());
+			Audio::PlayAudio(AUDIO_SELECT, 1.00f);
 		}
 		if (Input::KeyPressed(GLFW_KEY_ESCAPE)) {
 			return;
@@ -117,21 +110,23 @@ void Engine::Run() {
     double lastFrame = glfwGetTime();
     double thisFrame = lastFrame;
     double deltaTimeAccumulator = 0.0;
-	double fixedDeltaTime = 1.0 / 60.0;
+    double fixedDeltaTime = 1.0 / 60.0;
 
     while (GL::WindowIsOpen() && GL::WindowHasNotBeenForceClosed()) {
-
-        if (Editor::WasForcedOpen()) {
-            _engineMode = EngineMode::Editor;
-        }
-
+               
         // Only the current player can be controlled by keyboard/mouse
-		for (int i = 0; i < Scene::_playerCount; i++) {
-			if (i != _currentPlayer || DebugMenu::IsOpen()) {
+		for (int i = 0; i < EngineState::GetPlayerCount(); i++) {
+			if (i != EngineState::GetCurrentPlayer() || DebugMenu::IsOpen()) {
 				Scene::_players[i]._ignoreControl = true;
 			}
 			else {
 				Scene::_players[i]._ignoreControl = false;
+			}
+		}
+
+		if (Input::KeyDown(HELL_KEY_M)) {
+			for (int i = 0; i < 1000; i++) {
+				std::cout << "shit\n";
 			}
 		}
 
@@ -141,14 +136,25 @@ void Engine::Run() {
         deltaTimeAccumulator += deltaTime;
 
         GL::ProcessInput();
-        Input::Update();
-        DebugMenu::Update();
-	
-        Audio::Update();
-        if (_engineMode == EngineMode::Game) {
 
-            //static int frameNumber = 0;
-            //std::cout << "FRAME: " << frameNumber++ << "\n";
+        // Cursor
+		if (EngineState::GetEngineMode() == GAME) {
+			GL::DisableCursor();
+		}
+		else if (EngineState::GetEngineMode() == EDITOR ||
+                 EngineState::GetEngineMode() == FLOORPLAN) {
+			GL::ShowCursor();
+		}
+
+        //////////////////////
+        //                  //
+        //      UPDATE      //
+
+        Input::Update();
+        DebugMenu::Update();	
+        Audio::Update();
+        if (EngineState::GetEngineMode() == GAME ||
+            EngineState::GetEngineMode() == EDITOR) {
 
             while (deltaTimeAccumulator >= fixedDeltaTime) {
                 deltaTimeAccumulator -= fixedDeltaTime;
@@ -163,40 +169,39 @@ void Engine::Run() {
             }
 
         }
-        else if (_engineMode == EngineMode::Editor) {
+        else if (EngineState::GetEngineMode() == FLOORPLAN) {
 
             LazyKeyPressesEditor();
-            Editor::Update(deltaTime);
+            Floorplan::Update(deltaTime);
         }
 
-        // Render
-        TextBlitter::Update(deltaTime);
-		if (_engineMode == EngineMode::Game) {
+		//////////////////////
+		//                  //
+		//      RENDER      //
 
-			GL::DisableCursor();
+        TextBlitter::Update(deltaTime);
+		if (EngineState::GetEngineMode() == GAME ||
+            EngineState::GetEngineMode() == EDITOR) {
             
-            if (Renderer::_viewportMode != FULLSCREEN) {
+            // Splitscreen
+            if (EngineState::GetViewportMode() == FULLSCREEN) {
+                Renderer::RenderFrame(&Scene::_players[EngineState::GetCurrentPlayer()]);
+		    }
+            // Fullscreen
+            else if (EngineState::GetViewportMode() == SPLITSCREEN) {
                 for (Player& player : Scene::_players) {
                     Renderer::RenderFrame(&player);
                 }
-            }
-            else {
-                Renderer::RenderFrame(&Scene::_players[_currentPlayer]);
-            }
-
+            }           
         }
-		else if (_engineMode == EngineMode::Editor) {
-
-			GL::ShowCursor();
-
-            Editor::PrepareRenderFrame();
+        // Floor plan
+		else if (EngineState::GetEngineMode() == FLOORPLAN) {
+            Floorplan::PrepareRenderFrame();
             Renderer::RenderEditorFrame();
         }
-
         if (DebugMenu::IsOpen()) {
             Renderer::RenderDebugMenu();
-        }
-
+		}
         GL::SwapBuffersPollEvents();
     }
 
@@ -206,12 +211,10 @@ void Engine::Run() {
 
 void Engine::Init() {
 
-    std::cout << "We are all alone on life's journey, held captive by the limitations of human consciousness.\n";
 
     Input::Init();
     Physics::Init();
 
-    Editor::Init();
     Audio::Init();
 
     Scene::LoadMap("map.txt");
@@ -238,7 +241,7 @@ void Engine::LazyKeyPresses() {
         Renderer::HotloadShaders();
     }
     if (Input::KeyPressed(GLFW_KEY_F)) {
-        ToggleFullscreen();
+		ToggleFullscreen();
     }
     if (Input::KeyPressed(HELL_KEY_TAB)) {
 		Audio::PlayAudio(AUDIO_SELECT, 1.00f);
@@ -279,10 +282,16 @@ void Engine::LazyKeyPresses() {
         Audio::PlayAudio(AUDIO_SELECT, 1.00f);
     }
     if (Input::KeyPressed(GLFW_KEY_C)) {
-        NextPlayer();
+        EngineState::NextPlayer();
+		if (EngineState::GetViewportMode() == FULLSCREEN) {
+			Renderer::RecreateFrameBuffers(EngineState::GetCurrentPlayer());
+		}
+		Audio::PlayAudio(AUDIO_SELECT, 1.00f);
     }
     if (Input::KeyPressed(GLFW_KEY_V)) {
-        NextViewportMode();
+		EngineState::NextViewportMode();
+		Renderer::RecreateFrameBuffers(EngineState::GetCurrentPlayer());
+		Audio::PlayAudio(AUDIO_SELECT, 1.00f);
     }
     if (Input::KeyPressed(GLFW_KEY_N)) {
         Physics::ClearCollisionLists();
@@ -302,56 +311,20 @@ void Engine::LazyKeyPressesEditor() {
         ToggleFullscreen();
     }
     if (Input::KeyPressed(HELL_KEY_TAB)) {
-        ToggleEditor();
+        //ToggleEditor();
     }
     if (Input::KeyPressed(GLFW_KEY_X)) {
-        Editor::NextMode();
+        Floorplan::NextMode();
         Audio::PlayAudio(AUDIO_SELECT, 1.00f);
     }
     if (Input::KeyPressed(GLFW_KEY_Z)) {
-        Editor::PreviousMode();
+        Floorplan::PreviousMode();
         Audio::PlayAudio(AUDIO_SELECT, 1.00f);
     }
 }
 
-void ToggleEditor() {
-    if (_engineMode == EngineMode::Game) {
-        //GL::ShowCursor();
-        _engineMode = EngineMode::Editor;
-    }
-    else {
-        //GL::DisableCursor();
-        _engineMode = EngineMode::Game;
-    }
-    Audio::PlayAudio(AUDIO_SELECT, 1.00f);
-}
 void ToggleFullscreen() {
-    GL::ToggleFullscreen();
-    Renderer::RecreateFrameBuffers(_currentPlayer);
-    Audio::PlayAudio(AUDIO_SELECT, 1.00f);
-}
-
-void NextPlayer() {
-    _currentPlayer++;
-    if (_currentPlayer == Scene::_playerCount) {
-        _currentPlayer = 0;
-    }
-	if (Renderer::_viewportMode == FULLSCREEN) {
-		Renderer::RecreateFrameBuffers(_currentPlayer);
-	}    
-    Audio::PlayAudio(AUDIO_SELECT, 1.00f);
-    std::cout << "Current player is: " << _currentPlayer << "\n"; 
-}
-
-void NextViewportMode() {
-    int currentViewportMode = Renderer::_viewportMode;
-    currentViewportMode++;
-    if (currentViewportMode == ViewportMode::VIEWPORTMODE_COUNT) {
-        currentViewportMode = 0;
-    }
-    Renderer::_viewportMode = (ViewportMode)currentViewportMode;
-    Audio::PlayAudio(AUDIO_SELECT, 1.00f);
-
-    Renderer::RecreateFrameBuffers(_currentPlayer);
-    std::cout << "Current player: " << _currentPlayer << "\n";
+	GL::ToggleFullscreen();
+	Renderer::RecreateFrameBuffers(EngineState::GetCurrentPlayer());
+	Audio::PlayAudio(AUDIO_SELECT, 1.00f);
 }

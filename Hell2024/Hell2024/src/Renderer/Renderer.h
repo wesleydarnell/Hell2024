@@ -14,6 +14,7 @@ namespace Renderer {
 	void RenderUI(float viewportWidth, float viewportHeight);
 	void HotloadShaders();
 	void WipeShadowMaps();
+	void RenderEditorMode();
 
 	void QueueLineForDrawing(Line line);
 	void QueuePointForDrawing(Point point);
@@ -42,7 +43,6 @@ namespace Renderer {
 	//std::vector<int> UpdateDirtyPointCloudIndices();
 	//std::vector<glm::uvec4> UpdateDirtyGridChunks();
 
-	inline ViewportMode _viewportMode = FULLSCREEN;
 
 	inline int _method = 1;
 	inline bool _shadowMapsAreDirty = true;

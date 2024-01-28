@@ -18,7 +18,7 @@
 #include "../Core/Scene.h"
 #include "../Core/AssetManager.h"
 #include "../Core/TextBlitter.h"
-#include "../Core/Editor.h"
+#include "../Core/Floorplan.h"
 #include "Model.h"
 #include "NumberBlitter.h"
 #include "../Timer.hpp"
@@ -32,9 +32,9 @@
 #include "../Core/AnimatedGameObject.h"
 #include "../Effects/MuzzleFlash.h"
 #include "../Core/DebugMenu.h"
+#include "../EngineState.hpp"
 
 std::vector<glm::vec3> debugPoints;
-
 
 struct RenderTarget {
     GLuint fbo = { 0 };
@@ -85,6 +85,7 @@ struct Shaders {
 	Shader glassComposite;
 	Shader blurVertical;
 	Shader blurHorizontal;
+	Shader outline;
     ComputeShader compute;
 	ComputeShader pointCloud;
 	ComputeShader propogateLight;
@@ -98,11 +99,6 @@ struct SSBOs {
     GLuint rtMesh = 0;
     GLuint rtInstances = 0;
     GLuint dirtyPointCloudIndices = 0;
-    //GLuint dirtyGridChunks = 0; // 4x4x4
-   // GLuint atomicCounter = 0;
-    //GLuint propogationList = 0; // contains coords of all dirty grid points
-   // GLuint indirectDispatchSize = 0;
-   // GLuint floorVertices = 0;
     GLuint dirtyGridCoordinates = 0;
     GLuint instanceMatrices = 0;
 } _ssbos;
@@ -383,6 +379,7 @@ void Renderer::Init() {
 	_shaders.bulletDecals.Load("bullet_decals.vert", "bullet_decals.frag");
 	_shaders.glass.Load("glass.vert", "glass.frag");
 	_shaders.glassComposite.Load("glass_composite.vert", "glass_composite.frag");
+	_shaders.outline.Load("outline.vert", "outline.frag");
 	_shaders.skybox.Load("skybox.vert", "skybox.frag");
 	_shaders.computeTest.Load("res/shaders/test.comp");
     
@@ -595,6 +592,9 @@ void Renderer::RenderFrame(Player* player) {
     GBuffer& gBuffer = playerRenderTarget.gBuffer;
     PresentFrameBuffer& presentFrameBuffer = playerRenderTarget.presentFrameBuffer;
 
+	glm::mat4 projection = Renderer::GetProjectionMatrix(_depthOfFieldScene); // 1.0 for weapon, 0.9 for scene.
+	glm::mat4 view = player->GetViewMatrix();
+
 	_shaders.UI.Use();
 	_shaders.UI.SetVec3("overrideColor", WHITE);
 
@@ -675,6 +675,11 @@ void Renderer::RenderFrame(Player* player) {
     // Render any debug shit, like the point cloud, prorogation grid, misc points, lines, etc
     DebugPass(player);
 
+    // Render editor mode UI if needed?
+    if (EngineState::GetEngineMode() == EngineMode::EDITOR) {
+        RenderEditorMode();
+    }
+
     // Render UI
     presentFrameBuffer.Bind();
     glDrawBuffer(GL_COLOR_ATTACHMENT1);
@@ -700,7 +705,16 @@ void Renderer::RenderFrame(Player* player) {
 	TextBlitter::_debugTextToBilt += "View pos: " + Util::Vec3ToString(player->GetViewPos()) + "\n";
 	TextBlitter::_debugTextToBilt += "View rot: " + Util::Vec3ToString(player->GetViewRotation()) + "\n";
 	//TextBlitter::_debugTextToBilt += "Grounded: " + std::to_string(Scene::_players[0]._isGrounded) + "\n";
-	//TextBlitter::_debugTextToBilt += "Y vel: " + std::to_string(Scene::_players[0]._yVelocity) + "\n";
+	TextBlitter::_debugTextToBilt += "Y vel: " + std::to_string(Scene::_players[0]._yVelocity) + "\n";
+	//TextBlitter::_debugTextToBilt += "Mouse ray: " + Util::Vec3ToString(EngineState::_mouseRay) + "\n";
+
+	TextBlitter::_debugTextToBilt += "X: " + std::to_string(Input::GetMouseX()) +"\n";
+	TextBlitter::_debugTextToBilt += "Y: " + std::to_string(Input::GetMouseY()) +"\n";
+
+	TextBlitter::_debugTextToBilt += "Win width: " + std::to_string(GL::GetWindowWidth()) + "\n";
+	TextBlitter::_debugTextToBilt += "Win height: " + std::to_string(GL::GetWindowHeight()) + "\n";
+    
+
     //TextBlitter::_debugTextToBilt = "";
     
     if (!_toggles.drawDebugText) {
@@ -718,13 +732,13 @@ void Renderer::RenderFrame(Player* player) {
 
 
     // Blit that smaller FBO into the main frame buffer 
-    if (_viewportMode == FULLSCREEN) {
+    if (EngineState::GetViewportMode() == FULLSCREEN) {
         glBindFramebuffer(GL_READ_FRAMEBUFFER, playerRenderTarget.presentFrameBuffer.GetID());
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
         glReadBuffer(GL_COLOR_ATTACHMENT1);
         glBlitFramebuffer(0, 0, playerRenderTarget.presentFrameBuffer.GetWidth(), playerRenderTarget.presentFrameBuffer.GetHeight(), 0, 0, GL::GetWindowWidth(), GL::GetWindowHeight(), GL_COLOR_BUFFER_BIT, GL_NEAREST);
     }
-    else if (_viewportMode == SPLITSCREEN) {
+    else if (EngineState::GetViewportMode() == SPLITSCREEN) {
 
         if (GetPlayerIndexFromPlayerPointer(player) == 0) {
             glBindFramebuffer(GL_READ_FRAMEBUFFER, playerRenderTarget.presentFrameBuffer.GetID());
@@ -747,6 +761,89 @@ void Renderer::RenderFrame(Player* player) {
     for (Light& light : Scene::_lights) {
         light.isDirty = false;
     }
+}
+
+void Renderer::RenderEditorMode() {
+
+    Scene::Update3DEditorScene();
+
+	glm::mat4 projection = glm::perspective(1.0f, 1920.0f / 1080.0f, NEAR_PLANE, FAR_PLANE);
+	glm::mat4 view = Scene::_players[0].GetViewMatrix();
+
+	_shaders.outline.Use();
+	_shaders.outline.SetMat4("projection", projection);
+	_shaders.outline.SetMat4("view", view);
+
+    glm::vec3 rayOrigin = Scene::_players[0].GetViewPos();
+    glm::vec3 rayDirection = Util::GetMouseRay(projection, view, GL::GetWindowWidth(), GL::GetWindowHeight(), Input::GetMouseX(), Input::GetMouseY());
+	auto result = Util::CastPhysXRay(rayOrigin, rayDirection , 100, true);
+
+	if (!result.hitFound) {
+		std::cout << "hit not found\n";
+        return;
+    }
+
+    std::cout << "hit found\n";
+
+    // ray was found, is it a game object?
+
+	GameObject* couch = Scene::GetGameObjectByName("Sofa");
+	std::vector<GameObject*> selectedObjects;
+    //selectedObjects.push_back(couch);
+
+
+    if (result.physicsObjectType == PhysicsObjectType::GAME_OBJECT) {
+        if (result.parent) {
+            GameObject* hitObject = (GameObject*)result.parent;
+            selectedObjects.push_back(hitObject);
+        }
+    }
+
+   
+	glDisable(GL_DEPTH_TEST);
+	glEnable(GL_STENCIL_TEST);
+	glStencilMask(0xff);
+	glClearStencil(0);
+	glClear(GL_STENCIL_BUFFER_BIT);
+	glStencilOp(GL_REPLACE, GL_REPLACE, GL_REPLACE);
+	glStencilFunc(GL_ALWAYS, 1, 1);
+	glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);    
+	for (auto* gameObject : selectedObjects) {
+		_shaders.outline.SetMat4("model", gameObject->GetModelMatrix());
+		for (int i = 0; i < gameObject->_meshMaterialIndices.size(); i++) {
+			gameObject->_model->_meshes[i].Draw();
+		}
+	}
+
+
+
+	glStencilFunc(GL_NOTEQUAL, 1, 0xFF);
+	glStencilMask(0x00);
+	glEnable(GL_STENCIL_TEST);
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	glDisable(GL_DEPTH_TEST);
+
+	_shaders.outline.SetInt("offset", 1);
+	for (auto* gameObject : selectedObjects) {
+		_shaders.outline.SetMat4("model", gameObject->GetModelMatrix());
+		for (int i = 0; i < gameObject->_meshMaterialIndices.size(); i++) {
+			gameObject->_model->_meshes[i].Draw();
+		}
+	}
+	_shaders.outline.SetInt("offset", 2);
+	for (auto* gameObject : selectedObjects) {
+		_shaders.outline.SetMat4("model", gameObject->GetModelMatrix());
+		for (int i = 0; i < gameObject->_meshMaterialIndices.size(); i++) {
+			gameObject->_model->_meshes[i].Draw();
+		}
+	}
+   
+        
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	glDepthMask(GL_TRUE);
+	glDisable(GL_STENCIL_TEST);
+
+	_shaders.outline.SetInt("offset", 0);
 }
 
 
@@ -937,7 +1034,7 @@ void DrawHud(Player* player) {
 	float viewportWidth = gBuffer.GetWidth();
 	float viewportHeight = gBuffer.GetHeight();
 
-    if (Renderer::_viewportMode == SPLITSCREEN) {
+    if (EngineState::GetViewportMode() == SPLITSCREEN) {
         slashYPos = gBuffer.GetHeight() - 70.0f;
         scale = 1.05f;
     }
@@ -1255,10 +1352,10 @@ void DebugPass(Player* player) {
             _shaders.solidColor.SetMat4("model", glm::mat4(1));
             auto* renderBuffer = &scene->getRenderBuffer();
 
-            if (_debugLineRenderMode == DebugLineRenderMode::PHYSX_EDITOR) {
+            if (_debugLineRenderMode == DebugLineRenderMode::PHYSX_EDITOR) {   
 
-                Physics::GetEditorScene()->simulate(1/60.0f);
-                Physics::GetEditorScene()->fetchResults(true);
+                Scene::Update3DEditorScene();
+
 
                 renderBuffer = &Physics::GetEditorScene()->getRenderBuffer();
                 color = PURPLE;
@@ -1333,10 +1430,10 @@ void Renderer::RecreateFrameBuffers(int currentPlayer) {
 
     float width = (float)_renderWidth;
     float height = (float)_renderHeight;
-    int playerCount = Scene::_playerCount;
+    int playerCount = EngineState::GetPlayerCount();
 
     // Adjust for splitscreen
-    if (_viewportMode == SPLITSCREEN) {
+    if (EngineState::GetViewportMode() == SPLITSCREEN) {
         height *= 0.5f;
     }
 
@@ -1796,6 +1893,7 @@ void Renderer::HotloadShaders() {
 	_shaders.glass.Load("glass.vert", "glass.frag");
 	_shaders.glassComposite.Load("glass_composite.vert", "glass_composite.frag");
 	_shaders.skybox.Load("skybox.vert", "skybox.frag");
+	_shaders.outline.Load("outline.vert", "outline.frag");
 
     _shaders.compute.Load("res/shaders/compute.comp");
     _shaders.pointCloud.Load("res/shaders/point_cloud.comp");
@@ -1824,8 +1922,8 @@ void Renderer::RenderEditorFrame() {
     glEnable(GL_DEPTH_TEST);
 
     _shaders.editorTextured.Use();
-    _shaders.editorTextured.SetMat4("projection", Editor::GetProjectionMatrix());
-    _shaders.editorTextured.SetMat4("view", Editor::GetViewMatrix());
+    _shaders.editorTextured.SetMat4("projection", Floorplan::GetProjectionMatrix());
+    _shaders.editorTextured.SetMat4("view", Floorplan::GetViewMatrix());
     Transform t;
     t.position.y = -3.5f;
     _shaders.editorTextured.SetMat4("model", t.to_mat4());
@@ -1836,8 +1934,8 @@ void Renderer::RenderEditorFrame() {
     }
 
     _shaders.editorSolidColor.Use();
-    _shaders.editorSolidColor.SetMat4("projection", Editor::GetProjectionMatrix());
-    _shaders.editorSolidColor.SetMat4("view", Editor::GetViewMatrix());
+    _shaders.editorSolidColor.SetMat4("projection", Floorplan::GetProjectionMatrix());
+    _shaders.editorSolidColor.SetMat4("view", Floorplan::GetViewMatrix());
     _shaders.editorSolidColor.SetBool("uniformColor", false);
 
     RenderImmediate();
@@ -2089,8 +2187,8 @@ void Renderer::RenderUI(float viewportWidth, float viewportHeight) {
 
     //float viewportWidth = (float)_renderWidth;
     //float viewportHeight = (float)_renderHeight;
-    if (_viewportMode == SPLITSCREEN) {
-        viewportHeight *= 0.5f;
+    if (EngineState::GetViewportMode() == SPLITSCREEN) {
+      //  viewportHeight *= 0.5f;
     }
 
     for (UIRenderInfo& uiRenderInfo : _UIRenderInfos) {
@@ -2140,7 +2238,7 @@ glm::mat4 Renderer::GetProjectionMatrix(float depthOfField) {
     float width = (float)GL::GetWindowWidth();
     float height = (float)GL::GetWindowHeight();
 
-    if (_viewportMode == SPLITSCREEN) {
+    if (EngineState::GetViewportMode() == SPLITSCREEN) {
         height *= 0.5f;
     }
 
