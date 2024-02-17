@@ -8,6 +8,7 @@
 #include "Physics.h"
 #include "../Effects/BulletCasing.h"
 #include "../Effects/Decal.h"
+#include "Light.h"
 
 #define WALL_HEIGHT 2.4f
 
@@ -122,6 +123,7 @@ struct RTInstance {
 struct Bullet {
     glm::vec3 spawnPosition;
     glm::vec3 direction;
+    Weapon type;
 };
 
 
@@ -194,6 +196,7 @@ namespace Scene {
     std::vector<AnimatedGameObject>& GetAnimatedGameObjects();
     void CreatePointCloud();
     void CreateMeshData();
+    void AddLight(Light& light);
     void AddDoor(Door& door);
     void AddWall(Wall& wall);
     void AddFloor(Floor& floor);

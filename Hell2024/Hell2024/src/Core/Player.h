@@ -8,6 +8,8 @@
 #define GLOCK_MAX_AMMO_SIZE 200
 #define AKS74U_MAG_SIZE 30
 #define AKS74U_MAX_AMMO_SIZE 9999
+#define SHOTGUN_AMMO_SIZE 8
+#define SHOTGUN_MAX_AMMO_SIZE 9999
 
 struct Ammo {
 	int clip = 0;
@@ -15,8 +17,9 @@ struct Ammo {
 };
 
 struct Inventory {
-	Ammo glockAmmo;
-	Ammo aks74uAmmo;
+    Ammo glockAmmo;
+    Ammo aks74uAmmo;
+    Ammo shotgunAmmo;
 };
 
 class Player {
@@ -30,6 +33,9 @@ public:
 	//RayCastResult _cameraRayData;
 	AnimatedGameObject _characterModel;
 	PxController* _characterController = NULL;
+
+	PxShape* _itemPickupOverlapShape = NULL;
+	//PxRigidStatic* _itemPickupOverlapDebugBody = NULL;
 	float _yVelocity = 0;
 
 	Inventory _inventory;
@@ -40,7 +46,9 @@ public:
 	int GetCurrentWeaponClipAmmo();
 	int GetCurrentWeaponTotalAmmo();
 
-	bool _glockSlideNeedsToBeOut = false;
+    bool _glockSlideNeedsToBeOut = false;
+    bool _needsShotgunFirstShellAdded = false;
+    bool _needsShotgunSecondShellAdded = false; 
 
 	//void Init(glm::vec3 position);
 	void Update(float deltaTime);
@@ -60,8 +68,9 @@ public:
 	void UpdateFirstPersonWeaponLogicAndAnimations(float deltaTime);
 	AnimatedGameObject& GetFirstPersonWeapon();
 	void SpawnMuzzleFlash();
-	void SpawnGlockCasing();
-	void SpawnAKS74UCasing();
+    void SpawnGlockCasing();
+    void SpawnAKS74UCasing();
+    void SpawnShotgunShell();
 	float GetMuzzleFlashTime();
 	float GetMuzzleFlashRotation();
 	float GetRadius();
@@ -70,10 +79,14 @@ public:
 	//void WipeYVelocityToZeroIfHeadHitCeiling();
 	PxShape* GetCharacterControllerShape();
 	PxRigidDynamic* GetCharacterControllerActor();
+	void CreateItemPickupOverlapShape();
+	PxShape* GetItemPickupOverlapShape();
 
 	void ShowPickUpText(std::string text);
-	void PickUpAKS74U();
-	void PickUpAKS74UAmmo();
+    void PickUpAKS74U();
+    void PickUpAKS74UAmmo();
+    void PickUpShotgunAmmo();
+    void PickUpGlockAmmo();
 	void CastMouseRay();
 	void DropAKS7UMag();
 
@@ -85,15 +98,18 @@ public:
 
 	bool _isGrounded = true;
 
+    void PickUpShotgun();
+
 	std::string _pickUpText = "";
 	float _pickUpTextTimer = 0;
 
 private:
 
 	void Interact();
-	void SpawnBullet(float variance);
+	void SpawnBullet(float variance, Weapon type);
 	bool CanFire();
 	bool CanReload();
+	void CheckForItemPickOverlaps();
 
 	glm::mat4 _weaponSwayMatrix = glm::mat4(1);
 	bool _needsToDropAKMag = false;
@@ -109,7 +125,7 @@ private:
 	glm::mat4 _viewMatrix = glm::mat4(1);
 	glm::mat4 _inverseViewMatrix = glm::mat4(1);
 	glm::vec3 _viewPos = glm::vec3(0);
-	glm::vec3 _front = glm::vec3(0);
+	glm::vec3 _movementVector = glm::vec3(0);
 	glm::vec3 _forward = glm::vec3(0);
 	glm::vec3 _up = glm::vec3(0);
 	glm::vec3 _right = glm::vec3(0);

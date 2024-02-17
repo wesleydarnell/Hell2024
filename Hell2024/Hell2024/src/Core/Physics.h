@@ -30,6 +30,12 @@ struct CharacterCollisionReport {
 	glm::vec3 worldPosition;
 };
 
+struct OverlapReport {
+	std::vector<PxActor*> hits;
+	bool HitsFound() {
+		return hits.size();
+	}
+};
 
 class CCTHitCallback : public PxUserControllerHitReport {
 public:
@@ -47,7 +53,6 @@ namespace Physics {
 	PxPhysics* GetPhysics();
 	PxMaterial* GetDefaultMaterial();
 	PxScene* GetEditorScene();
-	PxScene* GetGizmoXTranslateScene();
 	PxShape* CreateBoxShape(float width, float height, float depth, Transform shapeOffset = Transform(), PxMaterial* material = NULL);
 	PxRigidDynamic* CreateRigidDynamic(Transform transform, PhysicsFilterData filterData, PxShape* shape, Transform shapeOffset = Transform());
 	PxRigidStatic* CreateRigidStatic(Transform transform, PhysicsFilterData physicsFilterData, PxShape* shape, Transform shapeOffset = Transform());
@@ -60,7 +65,7 @@ namespace Physics {
 	void DisableRigidBodyDebugLines(PxRigidBody* rigidBody);
 	std::vector<CollisionReport>& GetCollisions();
 	void ClearCollisionLists();
-	void UpdateGizmoScenes();
+	OverlapReport OverlapTest(const PxGeometry& overlapShape, const PxTransform& shapePose, PxU32 collisionGroup);
 
 	inline std::vector<CollisionReport> _collisionReports;
 	inline std::vector<CharacterCollisionReport> _characterCollisionReports;

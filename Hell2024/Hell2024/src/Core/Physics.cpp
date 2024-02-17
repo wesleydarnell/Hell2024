@@ -30,7 +30,6 @@ PxPhysics* _physics = NULL;
 PxDefaultCpuDispatcher* _dispatcher = NULL;
 PxScene* _scene = NULL;
 PxScene* _editorScene = NULL;
-PxScene* _gizmoXTranslateScene = NULL;
 PxMaterial* _defaultMaterial = NULL;
 ContactReportCallback   _contactReportCallback;
 PxRigidStatic* _groundPlane = NULL;
@@ -245,7 +244,6 @@ void Physics::Init() {
     sceneDesc.filterShader = contactReportFilterShader;
     sceneDesc.simulationEventCallback = &_contactReportCallback;
 
-
     _scene = _physics->createScene(sceneDesc);
     _scene->setVisualizationParameter(PxVisualizationParameter::eSCALE, 1.0f);
     _scene->setVisualizationParameter(PxVisualizationParameter::eCOLLISION_SHAPES, 2.0f);
@@ -253,11 +251,6 @@ void Physics::Init() {
 	_editorScene = _physics->createScene(sceneDesc);
 	_editorScene->setVisualizationParameter(PxVisualizationParameter::eSCALE, 1.0f);
 	_editorScene->setVisualizationParameter(PxVisualizationParameter::eCOLLISION_SHAPES, 2.0f);
-
-	_gizmoXTranslateScene = _physics->createScene(sceneDesc);
-    _gizmoXTranslateScene->setVisualizationParameter(PxVisualizationParameter::eSCALE, 1.0f);
-    _gizmoXTranslateScene->setVisualizationParameter(PxVisualizationParameter::eCOLLISION_SHAPES, 2.0f);
-
 
     PxPvdSceneClient* pvdClient = _scene->getScenePvdClient();
     if (pvdClient) {
@@ -295,10 +288,6 @@ PxScene* Physics::GetScene() {
 }
 PxScene* Physics::GetEditorScene() {
 	return _editorScene;
-}
-
-PxScene* Physics::GetGizmoXTranslateScene() {
-	return _gizmoXTranslateScene;
 }
 
 PxPhysics* Physics::GetPhysics() {
@@ -441,11 +430,32 @@ void Physics::ClearCollisionLists() {
     _characterCollisionReports.clear();
 }
 
-void Physics::UpdateGizmoScenes() {
-	_gizmoXTranslateScene->simulate(1 / 60.0f);
-    _gizmoXTranslateScene->fetchResults(true);
-}
-
 physx::PxRigidActor* Physics::GetGroundPlane() {
     return _groundPlane;
+}
+
+OverlapReport Physics::OverlapTest(const PxGeometry& overlapShape, const PxTransform& shapePose, PxU32 collisionGroup) {
+	PxQueryFilterData overlapFilterData = PxQueryFilterData();
+	overlapFilterData.data.word1 = collisionGroup;
+	const PxU32 bufferSize = 256;
+	PxOverlapHit hitBuffer[bufferSize];
+	PxOverlapBuffer buf(hitBuffer, bufferSize);
+    OverlapReport result;
+	if (Physics::GetScene()->overlap(overlapShape, shapePose, buf, overlapFilterData)) {
+		for (int i = 0; i < buf.getNbTouches(); i++) {
+			PxActor* hit = buf.getTouch(i).actor;
+			// Check for duplicates
+			bool found = false;
+			for (const PxActor* foundHit : result.hits) {
+				if (foundHit == hit) {
+					found = true;
+					break;
+				}
+			}
+			if (!found) {
+				result.hits.push_back(hit);
+			}
+		}
+	}
+	return result;
 }

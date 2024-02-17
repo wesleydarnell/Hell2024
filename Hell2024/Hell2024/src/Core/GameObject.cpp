@@ -18,7 +18,11 @@ void GameObject::SetPosition(float x, float y, float z) {
 }
 
 void GameObject::SetPosition(glm::vec3 position) {
-	_transform.position = position;
+    _transform.position = position;
+}
+
+void GameObject::SetRotation(glm::vec3 rotation) {
+    _transform.rotation = rotation;
 }
 
 void GameObject::SetPositionX(float position) {
@@ -133,14 +137,73 @@ void GameObject::Interact() {
 }
 
 void GameObject::Update(float deltaTime) {
+
+
+    if (_name == "GlockAmmo_PickUp") {
+
+   
+        GameObject* topDraw = Scene::GetGameObjectByName("TopDraw");
+        if (topDraw) {
+
+            glm::mat4 globalPose = Util::PxMat44ToGlmMat4(_collisionBody->getGlobalPose());        
+            float width = 0.4f;
+            float height = 0.4f;
+            float depth = 0.4f;
+            PxShape* overlapShape = Physics::CreateBoxShape(width, height, depth, Transform());
+            const PxGeometry& overlapGeometry = overlapShape->getGeometry();
+            const PxTransform shapePose(_collisionBody->getGlobalPose());
+            OverlapReport overlapReport = Physics::OverlapTest(overlapGeometry, shapePose, CollisionGroup::GENERIC_BOUNCEABLE);
+
+           // std::cout << "\nhit count: " << overlapReport.hits.size() << "\n";
+
+            if (overlapReport.HitsFound()) {
+                for (auto& hit : overlapReport.hits) {
+
+                  /* std::cout << "hit object:  " << hit << "\n";
+
+                    for (GameObject& object : Scene::_gameObjects) {
+                        if (object._collisionBody == hit) {
+                            std::cout << "-" << object.GetName() << "\n";
+                        }
+                    }
+                    */
+                    if (hit == topDraw->_collisionBody) {
+                        float speed = 3.0f;
+                        Transform displacement;
+
+                        if (topDraw->_openState == OpenState::OPENING) {
+                            displacement.position.z += deltaTime * speed;
+                            PxMat44 physXGlobalPose = Util::GlmMat4ToPxMat44(globalPose * displacement.to_mat4());
+                            PxTransform transform(physXGlobalPose);
+                            _collisionBody->setGlobalPose(transform);
+                        }
+                        else if (topDraw->_openState == OpenState::CLOSING) {
+                            displacement.position.z -= deltaTime * speed;
+                            PxMat44 physXGlobalPose = Util::GlmMat4ToPxMat44(globalPose * displacement.to_mat4());
+                            PxTransform transform(physXGlobalPose);
+                            _collisionBody->setGlobalPose(transform);
+                        }
+                    }
+                }                
+            }
+
+         //   std::cout << "ammo object: " << _collisionBody << "\n";
+        }
+    }
 	
+
+
 	if (_pickupType != PickUpType::NONE) {
+
+        // Decrement pickup cooldown timer
 		if (_pickupCoolDownTime > 0) {
 			_pickupCoolDownTime -= deltaTime;
 		}
+        // Respawn item when timer is zero
 		if (_pickupCoolDownTime <= 0) {
 			_pickupCoolDownTime = 0;
 			_collected = false;
+            EnableRaycasting();
 		}
 	}
 
@@ -175,6 +238,7 @@ void GameObject::Update(float deltaTime) {
 				_openTransform.position.z = 0;
 			}
 		}
+
 	}
 
 	if (_modelMatrixMode == ModelMatrixMode::GAME_TRANSFORM) {
@@ -586,9 +650,7 @@ void GameObject::SetModelMatrixMode(ModelMatrixMode modelMatrixMode) {
 }
 
 void GameObject::SetPhysicsTransform(glm::mat4 worldMatrix) {
-
-	std::cout << "cunt\n" << Util::Mat4ToString(worldMatrix) << "\n";
-
+	std::cout << Util::Mat4ToString(worldMatrix) << "\n";
 	_collisionBody->setGlobalPose(PxTransform(Util::GlmMat4ToPxMat44(worldMatrix)));
 }
 
@@ -606,10 +668,16 @@ void GameObject::CleanUp() {
 	}
 	if (_raycastBody) {
 		_raycastBody->release();
-	}
-	if (_raycastShape) {
-		_raycastShape->release();
-	}
+    }
+    if (_raycastShape) {
+        _raycastShape->release();
+    }
+    if (_editorRaycastBody) {
+        _editorRaycastBody->release();
+    }
+    if (_editorRaycastShape) {
+        _editorRaycastShape->release();
+    }
 }
 
 std::vector<Triangle> GameObject::GetTris() {
@@ -667,6 +735,19 @@ std::vector<Triangle> GameObject::GetTris() {
 void GameObject::PickUp() {
 	_collected = true;
 	_pickupCoolDownTime = Config::item_respawn_time;
+	PxMat44 matrix = Util::GlmMat4ToPxMat44(_transform.to_mat4());
+
+    if (_name == "GlockAmmo_PickUp") {
+        GameObject* topDraw = Scene::GetGameObjectByName("TopDraw");
+        matrix = Util::GlmMat4ToPxMat44(_transform.to_mat4() * topDraw->_openTransform.to_mat4());
+    }
+
+	_collisionBody->setGlobalPose(PxTransform(matrix));
+    DisableRaycasting();
+}
+
+void GameObject::PutRigidBodyToSleep() {
+    ((PxRigidDynamic*)_collisionBody)->putToSleep();
 }
 
 void GameObject::SetPickUpType(PickUpType pickupType) {
@@ -675,4 +756,22 @@ void GameObject::SetPickUpType(PickUpType pickupType) {
 
 bool GameObject::IsCollectable() {
 	return (_pickupType != PickUpType::NONE);
+}
+
+void GameObject::DisableRaycasting() {
+    auto filterData = _raycastShape->getQueryFilterData();
+    filterData.word0 = RAYCAST_DISABLED;
+    _raycastShape->setQueryFilterData(filterData);
+}
+
+void GameObject::EnableRaycasting() {
+
+    if (!_raycastShape) {
+        std::cout << "there is no raycast shape for game object with name: " << _name << "\n";
+        return;
+    }
+
+    auto filterData = _raycastShape->getQueryFilterData();
+    filterData.word0 = RAYCAST_ENABLED;
+    _raycastShape->setQueryFilterData(filterData);
 }
